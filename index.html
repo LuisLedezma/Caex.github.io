@@ -3,82 +3,82 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Expert AI - Komatsu 930E</title>
+    <title>Manual CAEX 930E</title>
     <style>
-        :root { --blue: #004098; --yellow: #ffcc00; --dark: #1a1a2e; }
-        body { font-family: 'Segoe UI', sans-serif; margin: 0; background: var(--dark); color: white; display: flex; flex-direction: column; height: 100vh; }
-        header { background: var(--blue); padding: 15px; text-align: center; border-bottom: 4px solid var(--yellow); font-weight: bold; font-size: 1.2em; }
-        #chat { flex-grow: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 15px; }
-        .msg { max-width: 85%; padding: 12px 18px; border-radius: 15px; line-height: 1.5; font-size: 15px; }
-        .user { align-self: flex-end; background: var(--blue); border-bottom-right-radius: 2px; }
-        .ai { align-self: flex-start; background: #252545; border-left: 4px solid var(--yellow); border-bottom-left-radius: 2px; }
-        .input-area { background: #161625; padding: 20px; display: flex; gap: 10px; border-top: 1px solid #333; }
-        input { flex-grow: 1; padding: 12px; border: none; border-radius: 25px; background: #2d2d44; color: white; outline: none; }
-        button { background: var(--yellow); color: black; border: none; padding: 10px 20px; border-radius: 25px; font-weight: bold; cursor: pointer; }
-        button:disabled { background: #666; }
-        .status { font-size: 11px; text-align: center; color: #888; margin-top: 5px; }
+        :root { --blue: #004098; --yellow: #ffcc00; --bg: #1a1a2e; }
+        body { font-family: 'Segoe UI', sans-serif; margin: 0; background: var(--bg); color: white; }
+        header { background: var(--blue); padding: 20px; text-align: center; border-bottom: 4px solid var(--yellow); position: sticky; top: 0; }
+        .container { padding: 20px; max-width: 600px; margin: auto; }
+        .search-box { width: 100%; padding: 15px; border-radius: 25px; border: none; font-size: 18px; margin-bottom: 20px; box-sizing: border-box; outline: none; }
+        .card { background: #252545; border-left: 5px solid var(--yellow); padding: 15px; border-radius: 8px; margin-bottom: 15px; display: none; }
+        .card h3 { color: var(--yellow); margin-top: 0; }
+        .card p { margin: 5px 0; font-size: 14px; line-height: 1.4; }
+        .tag { background: var(--blue); padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+        #no-result { text-align: center; color: #888; margin-top: 20px; }
     </style>
 </head>
 <body>
 
-<header>930E-2/3 EXPERT AI</header>
+<header>
+    <div style="font-size: 20px; font-weight: bold;">CONSULTA TÉCNICA 930E</div>
+    <div style="font-size: 12px; opacity: 0.8;">Base de Datos Offline - Sin API</div>
+</header>
 
-<div id="chat">
-    <div class="msg ai">Soporte Técnico Activo. Ingrese código de falla o síntoma (Ej: Falla 025 o sobretemperatura).</div>
-</div>
+<div class="container">
+    <input type="text" id="search" class="search-box" placeholder="Escribe código o componente..." onkeyup="buscar()">
+    
+    <div id="results">
+        <div class="card" data-key="025 bus dc sobrevoltaje">
+            <h3>Falla 025: Sobrevoltaje Bus DC</h3>
+            <p><span class="tag">Sistema:</span> Invertex II / Propulsión</p>
+            <p><strong>Causa:</strong> El voltaje del bus DC excedió el límite seguro (aprox. 3600V).</p>
+            <p><strong>Acción:</strong> Revisar rejillas de retardo, verificar sopladores y contactores de frenado dinámico.</p>
+        </div>
 
-<div id="status" class="status"></div>
+        <div class="card" data-key="a151 motor nivel aceite">
+            <h3>Falla A151: Nivel de Aceite Bajo</h3>
+            <p><span class="tag">Sistema:</span> Motor Cummins QSK60</p>
+            <p><strong>Causa:</strong> Sensor de nivel detectó aceite bajo el mínimo operativo.</p>
+            <p><strong>Acción:</strong> Detener motor, verificar varilla físicamente y buscar fugas externas.</p>
+        </div>
 
-<div class="input-area">
-    <input type="text" id="userInput" placeholder="Describa la falla..." onkeypress="if(event.key==='Enter') askAI()">
-    <button id="sendBtn" onclick="askAI()">ANALIZAR</button>
-</div>
-
-<script type="module">
-    import { GoogleGenerativeAI } from "https://esm.run/@google/generative-ai";
-
-    // NUEVA CLAVE DE API CARGADA
-    const API_KEY = "AQ.Ab8RN6I_Si5HPlmwEs_b_9bm4AdqU_YFCjilkGpT57Z-vqL7UA";
-    const genAI = new GoogleGenerativeAI(API_KEY);
-    const model = genAI.getGenerativeModel({ 
-        model: "gemini-1.5-flash",
-        systemInstruction: "Eres un Ingeniero Senior experto en camiones Komatsu 930E-2 y 930E-3. Tu especialidad es Invertex II, motores QSK60 y sistemas hidráulicos. Responde de forma técnica, clara y siempre priorizando procedimientos de seguridad (LOTOTO)."
-    });
-
-    window.askAI = async () => {
-        const input = document.getElementById('userInput');
-        const btn = document.getElementById('sendBtn');
-        const chat = document.getElementById('chat');
-        const status = document.getElementById('status');
+        <div class="card" data-key="direccion hidraulico presion">
+            <h3>Baja Presión de Dirección</h3>
+            <p><span class="tag">Sistema:</span> Hidráulico</p>
+            <p><strong>Causa:</strong> Presión en acumuladores por debajo de 2000 PSI.</p>
+            <p><strong>Acción:</strong> Revisar bomba de dirección y purgar aire del sistema. Verificar carga de nitrógeno.</p>
+        </div>
         
-        if (!input.value.trim()) return;
+        </div>
 
-        const prompt = input.value;
-        addMsg(prompt, 'user');
-        input.value = '';
-        btn.disabled = true;
-        status.innerText = "Consultando manuales de servicio...";
+    <div id="no-result">Escribe para buscar información técnica...</div>
+</div>
 
-        try {
-            const result = await model.generateContent(prompt);
-            const response = await result.response;
-            addMsg(response.text(), 'ai');
-        } catch (error) {
-            console.error(error);
-            addMsg("Error: " + (error.message.includes("API key") ? "Clave API no activada o inválida." : "Error de conexión en faena."), 'ai');
-        } finally {
-            btn.disabled = false;
-            status.innerText = "";
-            chat.scrollTop = chat.scrollHeight;
+<script>
+    function buscar() {
+        let input = document.getElementById('search').value.toLowerCase();
+        let cards = document.getElementsByClassName('card');
+        let noResult = document.getElementById('no-result');
+        let encontrados = 0;
+
+        if (input.length < 1) {
+            for (let card of cards) card.style.display = 'none';
+            noResult.style.display = 'block';
+            return;
         }
-    };
 
-    function addMsg(text, type) {
-        const div = document.createElement('div');
-        div.className = `msg ${type}`;
-        div.innerHTML = text.replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
-        document.getElementById('chat').appendChild(div);
-        document.getElementById('chat').scrollTop = document.getElementById('chat').scrollHeight;
+        for (let card of cards) {
+            let key = card.getAttribute('data-key');
+            if (key.includes(input)) {
+                card.style.display = 'block';
+                encontrados++;
+            } else {
+                card.style.display = 'none';
+            }
+        }
+
+        noResult.style.display = encontrados > 0 ? 'none' : 'block';
+        if (encontrados === 0) noResult.innerText = "No se encontró información para esa búsqueda.";
     }
 </script>
 
