@@ -3,83 +3,113 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Manual CAEX 930E</title>
+    <title>Buscador Eventos 930E</title>
     <style>
-        :root { --blue: #004098; --yellow: #ffcc00; --bg: #1a1a2e; }
-        body { font-family: 'Segoe UI', sans-serif; margin: 0; background: var(--bg); color: white; }
-        header { background: var(--blue); padding: 20px; text-align: center; border-bottom: 4px solid var(--yellow); position: sticky; top: 0; }
-        .container { padding: 20px; max-width: 600px; margin: auto; }
-        .search-box { width: 100%; padding: 15px; border-radius: 25px; border: none; font-size: 18px; margin-bottom: 20px; box-sizing: border-box; outline: none; }
-        .card { background: #252545; border-left: 5px solid var(--yellow); padding: 15px; border-radius: 8px; margin-bottom: 15px; display: none; }
-        .card h3 { color: var(--yellow); margin-top: 0; }
-        .card p { margin: 5px 0; font-size: 14px; line-height: 1.4; }
-        .tag { background: var(--blue); padding: 2px 8px; border-radius: 4px; font-size: 12px; }
-        #no-result { text-align: center; color: #888; margin-top: 20px; }
+        :root { --komatsu-blue: #004098; --komatsu-yellow: #ffcc00; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; background-color: #f4f4f9; color: #333; }
+        header { background-color: var(--komatsu-blue); color: white; padding: 20px; text-align: center; border-bottom: 5px solid var(--komatsu-yellow); box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
+        .container { padding: 20px; max-width: 800px; margin: auto; }
+        .search-container { position: sticky; top: 10px; z-index: 100; }
+        #search { width: 100%; padding: 15px 20px; border-radius: 30px; border: 2px solid var(--komatsu-blue); font-size: 18px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); outline: none; }
+        .counter { text-align: right; font-size: 12px; color: #666; margin: 10px 5px; }
+        .card { background: white; border-radius: 10px; padding: 15px; margin-bottom: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border-left: 6px solid #ccc; display: none; transition: transform 0.2s; }
+        .card:hover { transform: scale(1.01); }
+        .card.active { display: block; }
+        .card h3 { margin: 0 0 10px 0; color: var(--komatsu-blue); display: flex; align-items: center; gap: 10px; }
+        .code-badge { background: var(--komatsu-yellow); color: black; padding: 2px 10px; border-radius: 5px; font-weight: bold; }
+        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 14px; }
+        .label { font-weight: bold; color: #555; }
+        #no-results { text-align: center; padding: 40px; color: #888; display: none; }
+        .critical { border-left-color: #d9534f; } /* Para fallas graves */
     </style>
 </head>
 <body>
 
 <header>
-    <div style="font-size: 20px; font-weight: bold;">CONSULTA TÉCNICA 930E</div>
-    <div style="font-size: 12px; opacity: 0.8;">Base de Datos Offline - Sin API</div>
+    <div style="font-size: 24px; font-weight: bold;">SISTEMA DE EVENTOS INVERTEX</div>
+    <div style="font-size: 14px;">930E-2 / 930E-3 - Base de Datos Local</div>
 </header>
 
 <div class="container">
-    <input type="text" id="search" class="search-box" placeholder="Escribe código o componente..." onkeyup="buscar()">
-    
-    <div id="results">
-        <div class="card" data-key="025 bus dc sobrevoltaje">
-            <h3>Falla 025: Sobrevoltaje Bus DC</h3>
-            <p><span class="tag">Sistema:</span> Invertex II / Propulsión</p>
-            <p><strong>Causa:</strong> El voltaje del bus DC excedió el límite seguro (aprox. 3600V).</p>
-            <p><strong>Acción:</strong> Revisar rejillas de retardo, verificar sopladores y contactores de frenado dinámico.</p>
+    <div class="search-container">
+        <input type="text" id="search" placeholder="Escriba el código (ej: 025)..." onkeyup="filtrar()">
+    </div>
+    <div class="counter" id="counter">Cargando eventos...</div>
+
+    <div id="eventos-list">
         </div>
 
-        <div class="card" data-key="a151 motor nivel aceite">
-            <h3>Falla A151: Nivel de Aceite Bajo</h3>
-            <p><span class="tag">Sistema:</span> Motor Cummins QSK60</p>
-            <p><strong>Causa:</strong> Sensor de nivel detectó aceite bajo el mínimo operativo.</p>
-            <p><strong>Acción:</strong> Detener motor, verificar varilla físicamente y buscar fugas externas.</p>
-        </div>
-
-        <div class="card" data-key="direccion hidraulico presion">
-            <h3>Baja Presión de Dirección</h3>
-            <p><span class="tag">Sistema:</span> Hidráulico</p>
-            <p><strong>Causa:</strong> Presión en acumuladores por debajo de 2000 PSI.</p>
-            <p><strong>Acción:</strong> Revisar bomba de dirección y purgar aire del sistema. Verificar carga de nitrógeno.</p>
-        </div>
-        
-        </div>
-
-    <div id="no-result">Escribe para buscar información técnica...</div>
+    <div id="no-results">
+        <p>No se encontraron eventos que coincidan con su búsqueda.</p>
+    </div>
 </div>
 
 <script>
-    function buscar() {
-        let input = document.getElementById('search').value.toLowerCase();
-        let cards = document.getElementsByClassName('card');
-        let noResult = document.getElementById('no-result');
+    // Información extraída de tu archivo Event_Codes_List.csv
+    const baseDatos = [
+        { code: "2", desc: "Ground Fault (Falla a Tierra)", sys: "General", type: "Falla" },
+        { code: "3", desc: "Excessive Ground Fault", sys: "General", type: "Falla" },
+        { code: "4", desc: "GF Cutout (Corte de Falla a Tierra)", sys: "Propel", type: "Control" },
+        { code: "5", desc: "Drive System Event", sys: "Drive System", type: "Falla" },
+        { code: "025", desc: "DC Bus Overvoltage (Sobrevoltaje)", sys: "Invertex / Bus DC", type: "Crítica" },
+        { code: "064", desc: "Inverter Overtemperature", sys: "Cooling", type: "Temperatura" },
+        { code: "151", desc: "Engine Oil Level Low", sys: "Engine", type: "Fluido" },
+        { code: "230", desc: "Link Cocking Fault", sys: "Invertex", type: "Control" },
+        { code: "633", desc: "TCI CPU Fault", sys: "TCI", type: "Hardware" },
+        { code: "636", desc: "Aux Blower Fault", sys: "Cooling", type: "Auxiliar" },
+        { code: "638", desc: "Engine Interface Fault", sys: "Engine", type: "Comunicación" },
+        { code: "640", desc: "Accel. Pedal Fault", sys: "Control", type: "Cabina" }
+    ];
+
+    const listaContainer = document.getElementById('eventos-list');
+    const contador = document.getElementById('counter');
+
+    // Función para crear las tarjetas al cargar la página
+    function cargarEventos() {
+        baseDatos.forEach(evento => {
+            const card = document.createElement('div');
+            card.className = `card ${evento.type === 'Crítica' ? 'critical' : ''}`;
+            card.setAttribute('data-search', `${evento.code} ${evento.desc.toLowerCase()} ${evento.sys.toLowerCase()}`);
+            
+            card.innerHTML = `
+                <h3><span class="code-badge">${evento.code}</span> ${evento.desc}</h3>
+                <div class="info-grid">
+                    <div><span class="label">Sistema:</span> ${evento.sys}</div>
+                    <div><span class="label">Tipo:</span> ${evento.type}</div>
+                </div>
+            `;
+            listaContainer.appendChild(card);
+        });
+        contador.innerText = `${baseDatos.length} eventos disponibles offline`;
+    }
+
+    function filtrar() {
+        const busqueda = document.getElementById('search').value.toLowerCase();
+        const cards = document.getElementsByClassName('card');
+        const noResults = document.getElementById('no-results');
         let encontrados = 0;
 
-        if (input.length < 1) {
-            for (let card of cards) card.style.display = 'none';
-            noResult.style.display = 'block';
+        if (busqueda === "") {
+            for (let card of cards) card.classList.remove('active');
+            noResults.style.display = "none";
             return;
         }
 
         for (let card of cards) {
-            let key = card.getAttribute('data-key');
-            if (key.includes(input)) {
-                card.style.display = 'block';
+            const contenido = card.getAttribute('data-search');
+            if (contenido.includes(busqueda)) {
+                card.classList.add('active');
                 encontrados++;
             } else {
-                card.style.display = 'none';
+                card.classList.remove('active');
             }
         }
 
-        noResult.style.display = encontrados > 0 ? 'none' : 'block';
-        if (encontrados === 0) noResult.innerText = "No se encontró información para esa búsqueda.";
+        noResults.style.display = encontrados === 0 ? "block" : "none";
     }
+
+    // Inicializar
+    window.onload = cargarEventos;
 </script>
 
 </body>
