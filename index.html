@@ -3,90 +3,104 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Buscador Técnico 930E</title>
+    <title>Consulta Técnica 930E</title>
     <style>
         :root { --blue: #004098; --yellow: #ffcc00; --dark: #1a1a2e; }
-        body { font-family: 'Segoe UI', sans-serif; margin: 0; background: #f0f2f5; color: #333; }
-        header { background: var(--blue); color: white; padding: 15px; text-align: center; border-bottom: 5px solid var(--yellow); }
-        .container { padding: 15px; max-width: 700px; margin: auto; }
-        #search { width: 100%; padding: 15px; border-radius: 25px; border: 2px solid var(--blue); font-size: 16px; outline: none; margin-bottom: 20px; }
-        .card { background: white; border-radius: 10px; padding: 15px; margin-bottom: 12px; border-left: 6px solid #ccc; display: none; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-        .card h3 { margin: 0; color: var(--blue); font-size: 18px; }
-        .details { font-size: 14px; margin-top: 8px; line-height: 1.4; }
-        .label { font-weight: bold; color: #555; }
-        .critica { border-left-color: #d9534f; }
-        #no-result { text-align: center; color: #888; margin-top: 30px; }
+        body { font-family: 'Segoe UI', sans-serif; margin: 0; background: var(--dark); color: white; }
+        header { background: var(--blue); padding: 15px; text-align: center; border-bottom: 4px solid var(--yellow); }
+        .container { padding: 20px; max-width: 500px; margin: auto; }
+        .search-box { display: flex; gap: 10px; margin-bottom: 20px; }
+        input { flex: 1; padding: 12px; border-radius: 20px; border: none; outline: none; font-size: 16px; }
+        button { background: var(--yellow); border: none; padding: 10px 25px; border-radius: 20px; font-weight: bold; cursor: pointer; }
+        .result-card { background: #252545; border-left: 5px solid var(--yellow); padding: 20px; border-radius: 8px; display: none; margin-top: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); }
+        .loader { display: none; text-align: center; color: var(--yellow); font-size: 14px; margin-top: 10px; }
+        .info-row { margin-bottom: 10px; border-bottom: 1px solid #333; padding-bottom: 5px; }
+        .label { color: var(--yellow); font-size: 12px; text-transform: uppercase; font-weight: bold; display: block; }
     </style>
 </head>
 <body>
 
 <header>
-    <div style="font-weight: bold;">MANUAL DE EVENTOS 930E</div>
-    <div style="font-size: 12px;">Datos extraídos del PDF - Offline</div>
+    <div style="font-size: 18px; font-weight: bold;">ASISTENTE DE FALLAS 930E</div>
+    <div style="font-size: 10px; opacity: 0.8; margin-top: 5px;">CONSULTA DINÁMICA DE MANUAL CSV</div>
 </header>
 
 <div class="container">
-    <input type="text" id="search" placeholder="Buscar código o descripción..." onkeyup="buscar()">
+    <div class="search-box">
+        <input type="text" id="codigoInput" placeholder="Ej: 025, 636, 151..." onkeypress="if(event.key==='Enter') consultar()">
+        <button onclick="consultar()">BUSCAR</button>
+    </div>
+
+    <div id="loader" class="loader">Accediendo al servidor de datos...</div>
+
+    <div id="resultado" class="result-card">
+        <div class="info-row">
+            <span class="label">Código / Evento</span>
+            <div id="res-codigo" style="font-size: 20px; font-weight: bold;"></div>
+        </div>
+        <div class="info-row">
+            <span class="label">Sistema / Componente</span>
+            <div id="res-sistema"></div>
+        </div>
+        <div class="info-row">
+            <span class="label">Descripción Técnica</span>
+            <div id="res-descripcion" style="line-height: 1.4;"></div>
+        </div>
+    </div>
     
-    <div id="lista-eventos"></div>
-    <div id="no-result">Escriba para buscar...</div>
+    <div id="error-msg" style="color: #ff4444; text-align: center; font-size: 14px; margin-top: 20px;"></div>
 </div>
 
 <script>
-    // Datos extraídos directamente de tu archivo "codigos falla 930-e.pdf"
-    const eventos = [
-        { c: "025", d: "DC Bus Overvoltage (Sobrevoltaje)", s: "Invertex", t: "Crítica", r: "Voltaje excedió los 3600V. Revisar rejillas y motores de soplado." },
-        { c: "064", d: "Inverter Overtemperature", s: "Enfriamiento", t: "Advertencia", r: "Temperatura alta en módulos de potencia. Limpiar ductos de aire." },
-        { c: "151", d: "Engine Oil Level Low", s: "Motor QSK60", t: "Crítica", r: "Nivel de aceite por debajo del mínimo. Detener equipo inmediatamente." },
-        { c: "230", d: "Link Cocking Fault", s: "Propulsión", t: "Control", r: "Falla en la secuencia de carga del bus DC." },
-        { c: "633", d: "TCI CPU Fault", s: "TCI", t: "Hardware", r: "Error interno en el procesador de control de la interface del camión." },
-        { c: "638", d: "Engine Interface Fault", s: "Comunicación", t: "Sistema", r: "Pérdida de comunicación entre TCI y módulo del motor." },
-        { c: "640", d: "Accel. Pedal Fault", s: "Cabina", t: "Sensor", r: "Señal fuera de rango en el pedal del acelerador." }
-        // Se pueden seguir añadiendo más filas del PDF aquí
-    ];
+    async function consultar() {
+        const codigo = document.getElementById('codigoInput').value.trim();
+        const loader = document.getElementById('loader');
+        const resCard = document.getElementById('resultado');
+        const errorMsg = document.getElementById('error-msg');
 
-    const contenedor = document.getElementById('lista-eventos');
+        if (!codigo) return;
 
-    function inicializar() {
-        eventos.forEach(ev => {
-            const div = document.createElement('div');
-            div.className = `card ${ev.t === 'Crítica' ? 'critica' : ''}`;
-            div.setAttribute('data-key', `${ev.c} ${ev.d.toLowerCase()} ${ev.s.toLowerCase()}`);
-            div.innerHTML = `
-                <h3><span style="background:var(--yellow);padding:2px 8px;border-radius:5px;color:black">${ev.c}</span> ${ev.d}</h3>
-                <div class="details">
-                    <p><span class="label">Sistema:</span> ${ev.s}</p>
-                    <p><span class="label">Revisar:</span> ${ev.r}</p>
-                </div>
-            `;
-            contenedor.appendChild(div);
-        });
-    }
+        // Limpiar pantalla
+        resCard.style.display = 'none';
+        errorMsg.innerText = '';
+        loader.style.display = 'block';
 
-    function buscar() {
-        const query = document.getElementById('search').value.toLowerCase();
-        const cards = document.getElementsByClassName('card');
-        const noRes = document.getElementById('no-result');
-        let encontrados = 0;
+        try {
+            // Buscamos el archivo en tu propio repositorio
+            const response = await fetch('Event_Codes_List.csv');
+            if (!response.ok) throw new Error('No se pudo cargar el manual CSV');
+            
+            const texto = await response.text();
+            const lineas = texto.split('\n');
+            
+            let encontrado = null;
 
-        if (query.length === 0) {
-            for (let c of cards) c.style.display = 'none';
-            noRes.style.display = 'block';
-            return;
-        }
-
-        for (let c of cards) {
-            if (c.getAttribute('data-key').includes(query)) {
-                c.style.display = 'block';
-                encontrados++;
-            } else {
-                c.style.display = 'none';
+            // Buscamos el código en las líneas del CSV
+            for (let i = 0; i < lineas.length; i++) {
+                const columnas = lineas[i].split(',');
+                // Si el primer o segundo elemento coincide con el código buscado
+                if (columnas[0]?.trim() === codigo || columnas[1]?.trim() === codigo) {
+                    encontrado = columnas;
+                    break;
+                }
             }
-        }
-        noRes.style.display = encontrados > 0 ? 'none' : 'block';
-    }
 
-    window.onload = inicializar;
+            if (encontrado) {
+                document.getElementById('res-codigo').innerText = "CÓDIGO " + (encontrado[0] || codigo);
+                document.getElementById('res-sistema').innerText = encontrado[2] || "GENERAL";
+                document.getElementById('res-descripcion').innerText = encontrado[3] || "Sin descripción adicional en el manual.";
+                resCard.style.display = 'block';
+            } else {
+                errorMsg.innerText = "El código " + codigo + " no existe en el listado actual.";
+            }
+
+        } catch (error) {
+            errorMsg.innerText = "Error de conexión: Asegúrate de que Event_Codes_List.csv esté en el repositorio.";
+            console.error(error);
+        } finally {
+            loader.style.display = 'none';
+        }
+    }
 </script>
 
 </body>
