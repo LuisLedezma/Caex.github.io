@@ -3,103 +3,68 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Consulta Técnica 930E</title>
+    <title>Buscador Web 930E</title>
     <style>
-        :root { --blue: #004098; --yellow: #ffcc00; --dark: #1a1a2e; }
-        body { font-family: 'Segoe UI', sans-serif; margin: 0; background: var(--dark); color: white; }
-        header { background: var(--blue); padding: 15px; text-align: center; border-bottom: 4px solid var(--yellow); }
-        .container { padding: 20px; max-width: 500px; margin: auto; }
-        .search-box { display: flex; gap: 10px; margin-bottom: 20px; }
-        input { flex: 1; padding: 12px; border-radius: 20px; border: none; outline: none; font-size: 16px; }
-        button { background: var(--yellow); border: none; padding: 10px 25px; border-radius: 20px; font-weight: bold; cursor: pointer; }
-        .result-card { background: #252545; border-left: 5px solid var(--yellow); padding: 20px; border-radius: 8px; display: none; margin-top: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); }
-        .loader { display: none; text-align: center; color: var(--yellow); font-size: 14px; margin-top: 10px; }
-        .info-row { margin-bottom: 10px; border-bottom: 1px solid #333; padding-bottom: 5px; }
-        .label { color: var(--yellow); font-size: 12px; text-transform: uppercase; font-weight: bold; display: block; }
+        :root { --blue: #004098; --yellow: #ffcc00; --dark: #121212; }
+        body { font-family: 'Segoe UI', sans-serif; margin: 0; background: var(--dark); color: white; text-align: center; }
+        header { background: var(--blue); padding: 20px; border-bottom: 5px solid var(--yellow); font-weight: bold; }
+        .container { padding: 30px; max-width: 500px; margin: auto; }
+        .input-group { margin-bottom: 25px; }
+        input { width: 100%; padding: 15px; border-radius: 10px; border: none; font-size: 18px; text-align: center; margin-bottom: 15px; box-sizing: border-box; }
+        .btn-search { background: var(--yellow); color: black; border: none; padding: 15px 30px; border-radius: 10px; font-weight: bold; cursor: pointer; width: 100%; font-size: 16px; transition: 0.3s; }
+        .btn-search:hover { background: #e6b800; }
+        .info-card { background: #1e1e1e; border: 1px solid #333; padding: 20px; border-radius: 10px; margin-top: 20px; }
+        .source-link { display: block; background: #2d2d2d; color: var(--yellow); padding: 10px; margin: 10px 0; border-radius: 5px; text-decoration: none; font-size: 14px; }
+        .source-link:hover { background: #3d3d3d; }
     </style>
 </head>
 <body>
 
 <header>
-    <div style="font-size: 18px; font-weight: bold;">ASISTENTE DE FALLAS 930E</div>
-    <div style="font-size: 10px; opacity: 0.8; margin-top: 5px;">CONSULTA DINÁMICA DE MANUAL CSV</div>
+    SISTEMA DE BÚSQUEDA EN VIVO 930E
 </header>
 
 <div class="container">
-    <div class="search-box">
-        <input type="text" id="codigoInput" placeholder="Ej: 025, 636, 151..." onkeypress="if(event.key==='Enter') consultar()">
-        <button onclick="consultar()">BUSCAR</button>
+    <div class="input-group">
+        <input type="text" id="fallacode" placeholder="Ingrese Código (ej: 025)">
+        <button class="btn-search" onclick="buscarEnWeb()">BUSCAR EN LA RED</button>
     </div>
 
-    <div id="loader" class="loader">Accediendo al servidor de datos...</div>
-
-    <div id="resultado" class="result-card">
-        <div class="info-row">
-            <span class="label">Código / Evento</span>
-            <div id="res-codigo" style="font-size: 20px; font-weight: bold;"></div>
-        </div>
-        <div class="info-row">
-            <span class="label">Sistema / Componente</span>
-            <div id="res-sistema"></div>
-        </div>
-        <div class="info-row">
-            <span class="label">Descripción Técnica</span>
-            <div id="res-descripcion" style="line-height: 1.4;"></div>
-        </div>
+    <div class="info-card" id="instrucciones">
+        <p style="font-size: 14px; color: #888;">Esta herramienta buscará manuales y bases de datos técnicas del Komatsu 930E en tiempo real sin usar archivos internos.</p>
     </div>
-    
-    <div id="error-msg" style="color: #ff4444; text-align: center; font-size: 14px; margin-top: 20px;"></div>
+
+    <div id="resultados" style="display:none;">
+        <h3 style="color: var(--yellow);">Resultados para el código <span id="code-display"></span></h3>
+        <p>Seleccione una fuente técnica verificada:</p>
+        
+        <a id="link-google" target="_blank" class="source-link">🔍 Ver Manuales y PDFs en Google</a>
+        <a id="link-forum" target="_blank" class="source-link">🛠️ Buscar en Foros Técnicos</a>
+        <a id="link-direct" target="_blank" class="source-link">📖 Ver Info Técnica Komatsu</a>
+    </div>
 </div>
 
 <script>
-    async function consultar() {
-        const codigo = document.getElementById('codigoInput').value.trim();
-        const loader = document.getElementById('loader');
-        const resCard = document.getElementById('resultado');
-        const errorMsg = document.getElementById('error-msg');
+    function buscarEnWeb() {
+        const codigo = document.getElementById('fallacode').value.trim();
+        if (!codigo) return alert("Por favor, ingrese un código");
 
-        if (!codigo) return;
+        // Mostrar sección de resultados
+        document.getElementById('instrucciones').style.display = 'none';
+        document.getElementById('resultados').style.display = 'block';
+        document.getElementById('code-display').innerText = codigo;
 
-        // Limpiar pantalla
-        resCard.style.display = 'none';
-        errorMsg.innerText = '';
-        loader.style.display = 'block';
-
-        try {
-            // Buscamos el archivo en tu propio repositorio
-            const response = await fetch('Event_Codes_List.csv');
-            if (!response.ok) throw new Error('No se pudo cargar el manual CSV');
-            
-            const texto = await response.text();
-            const lineas = texto.split('\n');
-            
-            let encontrado = null;
-
-            // Buscamos el código en las líneas del CSV
-            for (let i = 0; i < lineas.length; i++) {
-                const columnas = lineas[i].split(',');
-                // Si el primer o segundo elemento coincide con el código buscado
-                if (columnas[0]?.trim() === codigo || columnas[1]?.trim() === codigo) {
-                    encontrado = columnas;
-                    break;
-                }
-            }
-
-            if (encontrado) {
-                document.getElementById('res-codigo').innerText = "CÓDIGO " + (encontrado[0] || codigo);
-                document.getElementById('res-sistema').innerText = encontrado[2] || "GENERAL";
-                document.getElementById('res-descripcion').innerText = encontrado[3] || "Sin descripción adicional en el manual.";
-                resCard.style.display = 'block';
-            } else {
-                errorMsg.innerText = "El código " + codigo + " no existe en el listado actual.";
-            }
-
-        } catch (error) {
-            errorMsg.innerText = "Error de conexión: Asegúrate de que Event_Codes_List.csv esté en el repositorio.";
-            console.error(error);
-        } finally {
-            loader.style.display = 'none';
-        }
+        // Construir búsquedas especializadas
+        const queryBase = `Komatsu 930E event code ${codigo}`;
+        
+        // Link 1: Búsqueda de archivos PDF y manuales específicos
+        document.getElementById('link-google').href = `https://www.google.com/search?q=${encodeURIComponent(queryBase + ' filetype:pdf')}`;
+        
+        // Link 2: Búsqueda en foros de maquinaria pesada
+        document.getElementById('link-forum').href = `https://www.google.com/search?q=${encodeURIComponent(queryBase + ' "troubleshooting" OR "repair"')}`;
+        
+        // Link 3: Búsqueda de imágenes/diagramas del código
+        document.getElementById('link-direct').href = `https://www.google.com/search?q=${encodeURIComponent('Komatsu 930E ' + codigo + ' circuit diagram')}&tbm=isch`;
     }
 </script>
 
