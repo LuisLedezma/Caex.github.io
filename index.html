@@ -23,14 +23,21 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, query } from 'firebase/firestore';
 
-// --- CONFIGURACIÓN FIREBASE Y CONSTANTES ---
-const firebaseConfig = JSON.parse(__firebase_config);
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'asarco-confiabilidad-v2';
-const apiKey = ""; 
+// --- CONFIGURACIÓN REQUERIDA PARA DESPLIEGUE ---
+// Si despliegas en GitHub, completa estos valores o usa variables de entorno
+const firebaseConfig = {
+  apiKey: "TU_API_KEY",
+  authDomain: "TU_PROYECTO.firebaseapp.com",
+  projectId: "TU_PROYECTO",
+  storageBucket: "TU_PROYECTO.appspot.com",
+  messagingSenderId: "ID_SENDER",
+  appId: "ID_APP"
+};
 
+// API Key para el Consultor IA (Gemini)
+const GEMINI_API_KEY = ""; 
+
+const APP_ID_PATH = 'asarco-confiabilidad-v2';
 const UMBRAL_MNP_MINUTOS = 10;
 
 const ESTADOS_DISPONIBLES = [
@@ -44,8 +51,9 @@ const ESTADOS_DISPONIBLES = [
   { id: 'CLIMA', label: 'Condiciones Climáticas', categoria: 'DEMORA' },
 ];
 
+// Componente de Tarjeta de Estadísticas
 const StatCard = ({ label, value, unit, icon: Icon, colorClass }) => (
-  <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+  <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm transition-all hover:shadow-md">
     <div className="flex items-center justify-between mb-2">
       <span className="text-sm font-medium text-slate-500">{label}</span>
       <Icon className={`w-5 h-5 ${colorClass}`} />
@@ -64,46 +72,78 @@ export default function App() {
   const [periodoHoras, setPeriodoHoras] = useState(720);
   const [chatInput, setChatInput] = useState("");
   const [chatHistory, setChatHistory] = useState([
-    { role: 'assistant', content: '¡Hola! He restaurado el consultor IA. Puedes preguntarme sobre el manual GCGPET-M-001 o los acuerdos de la Mesa Técnica de Abril 2026.' }
+    { role: 'assistant', content: '¡Hola! Soy tu asistente de confiabilidad ASARCO. Puedo ayudarte con cálculos de MTBF/MTTR o dudas sobre el manual GCGPET-M-001.' }
   ]);
   const [isTyping, setIsTyping] = useState(false);
   const [newEvento, setNewEvento] = useState({ descripcion: '', duracion: '', tipoId: 'FALLA' });
 
+  // Inicialización de Firebase
   useEffect(() => {
-    const initAuth = async () => {
-      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-        await signInWithCustomToken(auth, __initial_auth_token);
-      } else {
-        await signInAnonymously(auth);
-      }
-    };
-    initAuth();
-    const unsubscribe = onAuthStateChanged(auth, setUser);
-    return () => unsubscribe();
+    let authInstance;
+    try {
+      const app = initializeApp(firebaseConfig);
+      authInstance = getAuth(app);
+      
+      const initAuth = async () => {
+        try {
+          // Intento de conexión anónima para persistencia si no hay token específico
+          await signInAnonymously(authInstance);
+        } catch (e) {
+          console.warn("Firebase Auth no configurado correctamente. Usando modo offline.");
+        }
+      };
+      
+      initAuth();
+      const unsubscribe = onAuthStateChanged(authInstance, (u) => {
+        if (u) setUser(u);
+      });
+      return () => unsubscribe();
+    } catch (e) {
+      console.error("Error al inicializar Firebase:", e);
+    }
   }, []);
 
+  // Carga de datos desde Firestore (o LocalStorage como fallback)
   useEffect(() => {
-    if (!user) return;
-    const q = doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'main');
+    if (!user) {
+      const localData = localStorage.getItem('asarco_data');
+      if (localData) {
+        const parsed = JSON.parse(localData);
+        setEventos(parsed.eventos || []);
+        setPeriodoHoras(parsed.periodoHoras || 720);
+      }
+      return;
+    }
+
+    const db = getFirestore();
+    const q = doc(db, 'artifacts', APP_ID_PATH, 'users', user.uid, 'settings', 'main');
+    
     const unsubscribe = onSnapshot(q, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
         setEventos(data.eventos || []);
         setPeriodoHoras(data.periodoHoras || 720);
       }
-    }, (error) => console.error("Error Firestore:", error));
+    }, (error) => {
+      console.warn("Firestore inaccesible, operando en modo local.");
+    });
+    
     return () => unsubscribe();
   }, [user]);
 
   const saveToCloud = async (newEventos, newPeriodo) => {
+    // Siempre guardamos en LocalStorage por seguridad
+    localStorage.setItem('asarco_data', JSON.stringify({ eventos: newEventos, periodoHoras: newPeriodo }));
+    
     if (!user) return;
     try {
-      await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'main'), {
+      const db = getFirestore();
+      await setDoc(doc(db, 'artifacts', APP_ID_PATH, 'users', user.uid, 'settings', 'main'), {
         eventos: newEventos,
         periodoHoras: newPeriodo
       });
     } catch (e) {
-      console.error("Error al guardar:", e);
+      console.error("Error al sincronizar con la nube:", e);
     }
   };
 
@@ -114,7 +154,6 @@ export default function App() {
     });
 
     const tiempoNominal = Number(periodoHoras) || 0;
-
     const fallasValidas = dataEventos.filter(f => f.categoria === 'FS' && (Number(f.duracion) || 0) >= UMBRAL_MNP_MINUTOS);
     const tFallasTotal = fallasValidas.reduce((acc, curr) => acc + (Number(curr.duracion) || 0), 0) / 60;
 
@@ -130,12 +169,12 @@ export default function App() {
     const tTrabajoEfectivo = Math.max(0, tOperativoCalculado - tDemorasTotal - ruidoOperacionalTotal);
 
     const mtbf = fallasValidas.length > 0 ? (tOperativoCalculado / fallasValidas.length).toFixed(1) : tOperativoCalculado.toFixed(1);
-    const mttr = fallasValidas.length > 0 ? (tFallasTotal / fallasValidas.length).toFixed(1) : 0;
-    const disponibilidad = tiempoNominal > 0 ? ((tOperativoCalculado / tiempoNominal) * 100).toFixed(1) : 0;
+    const mttr = fallasValidas.length > 0 ? (tFallasTotal / fallasValidas.length).toFixed(1) : "0.0";
+    const disponibilidad = tiempoNominal > 0 ? ((tOperativoCalculado / tiempoNominal) * 100).toFixed(1) : "0.0";
     
     const utilizacion = tOperativoCalculado > 0 
       ? ((tTrabajoEfectivo / tOperativoCalculado) * 100).toFixed(1) 
-      : 0;
+      : "0.0";
 
     return { 
       mtbf, 
@@ -167,24 +206,26 @@ export default function App() {
   const askAI = async (e) => {
     e.preventDefault();
     if (!chatInput.trim() || isTyping) return;
+    
     const userQuery = chatInput;
     setChatHistory(prev => [...prev, { role: 'user', content: userQuery }]);
     setChatInput("");
     setIsTyping(true);
+
     try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{ parts: [{ text: userQuery }] }],
-          systemInstruction: { parts: [{ text: "Eres ASARCO, experto en confiabilidad para Codelco. Responde basándote en el manual GCGPET-M-001 y los acuerdos de la Mesa Técnica de Abril 2026. El umbral para MNP es >= 10 minutos. Sé técnico y preciso." }] }
+          systemInstruction: { parts: [{ text: "Eres ASARCO, experto en confiabilidad minera. El umbral para MNP es >= 10 minutos. Responde de forma técnica y breve." }] }
         })
       });
       const data = await response.json();
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "Lo siento, tuve un problema al procesar tu consulta.";
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "No pude procesar la consulta. Verifica la configuración de la API Key.";
       setChatHistory(prev => [...prev, { role: 'assistant', content: text }]);
     } catch (err) {
-      setChatHistory(prev => [...prev, { role: 'assistant', content: "Error de conexión con el motor IA. Por favor, reintenta." }]);
+      setChatHistory(prev => [...prev, { role: 'assistant', content: "Error de conexión con el motor IA." }]);
     } finally {
       setIsTyping(false);
     }
@@ -198,57 +239,72 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-900">
-      <header className="bg-indigo-900 text-white p-4 shadow-lg flex items-center justify-between">
+      <header className="bg-slate-900 text-white p-4 shadow-lg flex items-center justify-between sticky top-0 z-50">
         <div className="flex items-center gap-3">
-          <Zap className="w-6 h-6 text-yellow-400" />
-          <h1 className="text-xl font-bold">ASARCO <span className="text-indigo-300 text-xs font-normal italic">Gestión de Activos</span></h1>
+          <div className="bg-yellow-500 p-1.5 rounded-lg shadow-inner">
+            <Zap className="w-5 h-5 text-slate-900" />
+          </div>
+          <h1 className="text-xl font-bold tracking-tight">ASARCO <span className="text-yellow-500 text-xs font-medium uppercase tracking-widest ml-1 hidden sm:inline">Confiabilidad</span></h1>
         </div>
-        <div className="flex bg-indigo-950/50 p-1 rounded-lg border border-white/10">
-          <button onClick={() => setActiveTab('calculadora')} className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${activeTab === 'calculadora' ? 'bg-white text-indigo-900 shadow-sm' : 'text-indigo-200'}`}>Calculadora</button>
-          <button onClick={() => setActiveTab('consultor')} className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${activeTab === 'consultor' ? 'bg-white text-indigo-900 shadow-sm' : 'text-indigo-200'}`}>Consultor IA</button>
+        <div className="flex bg-slate-800 p-1 rounded-xl border border-white/5">
+          <button 
+            onClick={() => setActiveTab('calculadora')} 
+            className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${activeTab === 'calculadora' ? 'bg-yellow-500 text-slate-900 shadow-sm' : 'text-slate-400 hover:text-white'}`}
+          >
+            Calculadora
+          </button>
+          <button 
+            onClick={() => setActiveTab('consultor')} 
+            className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${activeTab === 'consultor' ? 'bg-yellow-500 text-slate-900 shadow-sm' : 'text-slate-400 hover:text-white'}`}
+          >
+            Consultor IA
+          </button>
         </div>
       </header>
 
-      <main className="flex-1 p-4 md:p-8 max-w-7xl mx-auto w-full space-y-6">
+      <main className="flex-1 p-4 md:p-6 lg:p-8 max-w-7xl mx-auto w-full space-y-6">
         {activeTab === 'calculadora' ? (
           <>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
               <StatCard label="MTBF" value={metrics.mtbf} unit="hrs" icon={Clock} colorClass="text-blue-600" />
-              <StatCard label="MTTR" value={metrics.mttr} unit="hrs" icon={AlertCircle} colorClass="text-amber-600" />
+              <StatCard label="MTTR" value={metrics.mttr} unit="hrs" icon={AlertCircle} colorClass="text-red-500" />
               <StatCard label="Disponibilidad" value={metrics.disponibilidad} unit="%" icon={CheckCircle2} colorClass="text-emerald-600" />
-              <StatCard label="Utilización" value={metrics.utilizacion} unit="%" icon={BarChart3} colorClass="text-purple-600" />
+              <StatCard label="Utilización" value={metrics.utilizacion} unit="%" icon={BarChart3} colorClass="text-amber-500" />
               <StatCard label="T. Operativo" value={metrics.tOperativoTotal} unit="hrs" icon={Activity} colorClass="text-indigo-600" />
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="lg:col-span-2 space-y-6">
-                <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-                  <div className="flex items-center gap-2 mb-4">
-                    <Plus className="w-5 h-5 text-indigo-600" />
-                    <h3 className="font-semibold text-slate-800">Registrar Nuevo Estado</h3>
+                {/* Formulario */}
+                <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+                  <div className="flex items-center gap-2 mb-6">
+                    <div className="p-2 bg-indigo-50 rounded-lg text-indigo-600">
+                      <Plus className="w-5 h-5" />
+                    </div>
+                    <h3 className="font-bold text-slate-800">Registrar Evento</h3>
                   </div>
-                  <form onSubmit={addEvento} className="flex flex-wrap gap-4 items-end">
-                    <div className="flex-1 min-w-[200px]">
-                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Descripción</label>
+                  <form onSubmit={addEvento} className="grid grid-cols-1 md:grid-cols-12 gap-4">
+                    <div className="md:col-span-5">
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-1">Descripción</label>
                       <input 
-                        type="text" className="w-full px-3 py-2 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
-                        placeholder="Ej: Perforación Pozo 50"
+                        type="text" className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-sm"
+                        placeholder="Ej: Falla manguera hidráulica"
                         value={newEvento.descripcion}
                         onChange={e => setNewEvento({...newEvento, descripcion: e.target.value})}
                       />
                     </div>
-                    <div className="w-28">
-                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Minutos</label>
+                    <div className="md:col-span-2">
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-1">Minutos</label>
                       <input 
-                        type="number" className="w-full px-3 py-2 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
+                        type="number" className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-sm"
                         value={newEvento.duracion}
                         onChange={e => setNewEvento({...newEvento, duracion: e.target.value})}
                       />
                     </div>
-                    <div className="w-52">
-                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Estado</label>
+                    <div className="md:col-span-3">
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-1">Estado</label>
                       <select 
-                        className="w-full px-3 py-2 border border-slate-200 rounded-lg outline-none bg-white focus:ring-2 focus:ring-indigo-500 text-sm"
+                        className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-sm appearance-none"
                         value={newEvento.tipoId}
                         onChange={e => setNewEvento({...newEvento, tipoId: e.target.value})}
                       >
@@ -257,57 +313,63 @@ export default function App() {
                         ))}
                       </select>
                     </div>
-                    <button type="submit" className="h-[42px] px-6 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 transition-all shadow-md">Agregar</button>
+                    <div className="md:col-span-2 flex items-end">
+                      <button type="submit" className="w-full py-2.5 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition-all shadow-lg active:scale-95 text-sm">
+                        Añadir
+                      </button>
+                    </div>
                   </form>
                 </div>
 
-                <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-                  <div className="flex items-center gap-2 mb-4">
-                    <Clock className="w-5 h-5 text-indigo-600" />
-                    <h3 className="font-semibold text-slate-800">Bitácora Diaria</h3>
+                {/* Tabla */}
+                <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                  <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="p-2 bg-slate-100 rounded-lg text-slate-600">
+                        <Clock className="w-5 h-5" />
+                      </div>
+                      <h3 className="font-bold text-slate-800">Bitácora de Turno</h3>
+                    </div>
+                    <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-1 rounded-full font-bold uppercase">Actualizado</span>
                   </div>
                   <div className="overflow-x-auto">
                     <table className="w-full text-left">
-                      <thead>
-                        <tr className="border-b border-slate-100 text-xs text-slate-500 uppercase tracking-wider">
-                          <th className="pb-3 font-semibold">Evento / Descripción</th>
-                          <th className="pb-3 font-semibold text-center">Duración</th>
-                          <th className="pb-3 font-semibold text-center">Estado</th>
-                          <th className="pb-3 font-semibold">Impacto</th>
-                          <th className="pb-3"></th>
+                      <thead className="bg-slate-50/50">
+                        <tr className="text-[10px] text-slate-400 uppercase tracking-widest">
+                          <th className="px-6 py-4 font-bold">Evento</th>
+                          <th className="px-6 py-4 font-bold text-center">Duración</th>
+                          <th className="px-6 py-4 font-bold text-center">Clasificación</th>
+                          <th className="px-6 py-4 font-bold text-right">Acción</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-50">
                         {eventos.length === 0 ? (
                           <tr>
-                            <td colSpan="5" className="py-8 text-center text-slate-400 italic">No hay registros hoy.</td>
+                            <td colSpan="4" className="py-12 text-center text-slate-400 italic text-sm">No hay registros en el turno actual.</td>
                           </tr>
                         ) : (
                           eventos.map(evento => {
                             const conf = ESTADOS_DISPONIBLES.find(o => o.id === evento.tipoId) || ESTADOS_DISPONIBLES[0];
                             const dur = Number(evento.duracion);
                             return (
-                              <tr key={evento.id} className="hover:bg-slate-50/50 group transition-colors text-sm">
-                                <td className="py-3">
-                                  <div className="font-medium text-slate-700">{evento.descripcion}</div>
-                                  <div className="text-[10px] text-slate-400">{conf.label}</div>
+                              <tr key={evento.id} className="hover:bg-slate-50/80 group transition-colors">
+                                <td className="px-6 py-4">
+                                  <div className="font-bold text-slate-700 text-sm">{evento.descripcion}</div>
+                                  <div className="text-[10px] text-slate-400 mt-0.5">{conf.label}</div>
                                 </td>
-                                <td className="py-3 text-center font-mono">{evento.duracion}m</td>
-                                <td className="py-3 text-center">
-                                  <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${
-                                    conf.categoria === 'OP' ? 'bg-emerald-100 text-emerald-700' : 
-                                    conf.categoria === 'DEMORA' ? 'bg-amber-50 text-amber-600' : 'bg-red-50 text-red-600'
+                                <td className="px-6 py-4 text-center font-mono text-sm font-semibold text-slate-600">{evento.duracion} min</td>
+                                <td className="px-6 py-4 text-center">
+                                  <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-tighter ${
+                                    conf.categoria === 'OP' ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' : 
+                                    conf.categoria === 'DEMORA' ? 'bg-amber-50 text-amber-600 border border-amber-100' : 'bg-red-50 text-red-600 border border-red-100'
                                   }`}>
-                                    {conf.categoria === 'OP' ? 'Operativo' : conf.categoria === 'DEMORA' ? 'Demora' : 'Falla'}
+                                    {conf.categoria === 'OP' ? 'Operativo' : conf.categoria === 'DEMORA' ? 'Demora' : (dur < 10 ? 'Ruido' : 'Falla')}
                                   </span>
                                 </td>
-                                <td className="py-3 text-[11px] text-slate-500">
-                                  {conf.categoria === 'FS' && dur < 10 ? 'Ruido (Uti.)' : 
-                                   conf.categoria === 'FS' ? 'MNP (Disp.)' : 
-                                   conf.categoria === 'DEMORA' ? 'Demora (Uti.)' : 'Producción'}
-                                </td>
-                                <td className="py-3 text-right">
-                                  <button onClick={() => deleteEvento(evento.id)} className="text-slate-300 hover:text-red-500 p-1"><Trash2 className="w-4 h-4" /></button>
+                                <td className="px-6 py-4 text-right">
+                                  <button onClick={() => deleteEvento(evento.id)} className="text-slate-300 hover:text-red-500 p-2 transition-colors">
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
                                 </td>
                               </tr>
                             );
@@ -319,52 +381,65 @@ export default function App() {
                 </div>
               </div>
 
+              {/* Sidebar Derecha */}
               <div className="space-y-6">
-                <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-                  <div className="flex items-center gap-2 mb-4">
-                    <Settings className="w-5 h-5 text-indigo-600" />
-                    <h3 className="font-semibold text-slate-800">Horas Nominales</h3>
+                <div className="bg-slate-900 rounded-2xl shadow-xl p-6 text-white overflow-hidden relative">
+                  <div className="relative z-10">
+                    <div className="flex items-center gap-2 mb-4 opacity-70">
+                      <Settings className="w-4 h-4" />
+                      <h3 className="text-[10px] font-bold uppercase tracking-widest">Configuración</h3>
+                    </div>
+                    <label className="block text-xs text-slate-400 mb-2">Horas Nominales del Periodo</label>
+                    <input 
+                      type="number" 
+                      className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-xl font-black text-2xl text-yellow-500 outline-none focus:ring-2 focus:ring-yellow-500/50 transition-all"
+                      value={periodoHoras}
+                      onChange={e => {
+                        setPeriodoHoras(e.target.value);
+                        saveToCloud(eventos, e.target.value);
+                      }}
+                    />
+                    <div className="mt-4 flex gap-2">
+                      <button onClick={() => setPeriodoHoras(24)} className="text-[10px] px-2 py-1 bg-white/5 hover:bg-white/10 rounded border border-white/10 transition-all">24h</button>
+                      <button onClick={() => setPeriodoHoras(168)} className="text-[10px] px-2 py-1 bg-white/5 hover:bg-white/10 rounded border border-white/10 transition-all">168h</button>
+                      <button onClick={() => setPeriodoHoras(720)} className="text-[10px] px-2 py-1 bg-white/5 hover:bg-white/10 rounded border border-white/10 transition-all">720h</button>
+                    </div>
                   </div>
-                  <input 
-                    type="number" 
-                    className="w-full px-4 py-3 bg-indigo-50 border-2 border-indigo-200 rounded-xl font-bold text-indigo-900 text-xl outline-none"
-                    value={periodoHoras}
-                    onChange={e => {
-                      setPeriodoHoras(e.target.value);
-                      saveToCloud(eventos, e.target.value);
-                    }}
-                  />
-                  <p className="mt-2 text-[10px] text-slate-400">Periodo nominal editable (24h, 168h, 720h).</p>
+                  <Activity className="absolute -right-8 -bottom-8 w-32 h-32 text-white/5" />
                 </div>
 
-                <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-                  <h3 className="font-semibold text-slate-800 mb-4 flex items-center gap-2">
-                    <Activity className="w-5 h-5 text-indigo-600" />
-                    Distribución de Tiempo
+                <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+                  <h3 className="font-bold text-slate-800 mb-6 flex items-center gap-2">
+                    <BarChart3 className="w-5 h-5 text-indigo-600" />
+                    Utilización Física
                   </h3>
                   <div className="flex flex-col items-center">
-                    <div className="h-48 w-full">
+                    <div className="h-56 w-full">
                       <ResponsiveContainer width="100%" height="100%">
                         <PieChart>
                           <Pie
                             data={pieData}
-                            innerRadius={50} outerRadius={70} paddingAngle={5} dataKey="value"
+                            innerRadius={60} outerRadius={85} paddingAngle={8} dataKey="value"
+                            stroke="none"
                           >
                             {pieData.map((entry, index) => (
                               <Cell key={`cell-${index}`} fill={entry.color} />
                             ))}
                           </Pie>
-                          <Tooltip />
+                          <Tooltip 
+                            contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
+                          />
                         </PieChart>
                       </ResponsiveContainer>
                     </div>
-                    {/* Leyenda al costado/debajo con texto explícito */}
-                    <div className="w-full mt-4 space-y-2">
+                    <div className="w-full mt-6 space-y-3">
                       {pieData.map((item, idx) => (
-                        <div key={idx} className="flex items-center gap-3">
-                          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />
-                          <span className="text-xs font-semibold text-slate-700">{item.name}</span>
-                          <span className="text-xs text-slate-400 ml-auto">{Number(item.value).toFixed(1)} hrs</span>
+                        <div key={idx} className="flex items-center justify-between p-2 rounded-xl hover:bg-slate-50 transition-colors">
+                          <div className="flex items-center gap-3">
+                            <div className="w-2.5 h-2.5 rounded-full shadow-sm" style={{ backgroundColor: item.color }} />
+                            <span className="text-xs font-bold text-slate-600">{item.name}</span>
+                          </div>
+                          <span className="text-xs font-mono font-bold text-slate-900">{Number(item.value).toFixed(1)} <span className="text-[10px] text-slate-400 font-normal">hrs</span></span>
                         </div>
                       ))}
                     </div>
@@ -374,22 +449,29 @@ export default function App() {
             </div>
           </>
         ) : (
-          <div className="max-w-3xl mx-auto flex flex-col h-[600px] bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
-            <div className="bg-slate-50 p-4 border-b border-slate-200 flex items-center gap-3">
-              <div className="bg-indigo-600 p-2 rounded-lg">
-                <MessageSquare className="w-5 h-5 text-white" />
-              </div>
-              <div>
-                <h2 className="font-bold text-slate-800">Consultor IA ASARCO</h2>
-                <p className="text-[10px] text-slate-500 font-medium">Experto en Manual GCGPET-M-001</p>
+          <div className="max-w-3xl mx-auto flex flex-col h-[650px] bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="bg-slate-900 p-6 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="bg-indigo-500 p-2.5 rounded-2xl shadow-lg shadow-indigo-500/20">
+                  <MessageSquare className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h2 className="font-black text-white tracking-tight">IA ASARCO</h2>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Manual GCGPET-M-001</p>
+                  </div>
+                </div>
               </div>
             </div>
             
-            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+            <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50/50">
               {chatHistory.map((msg, i) => (
                 <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[85%] px-4 py-2.5 rounded-2xl text-sm ${
-                    msg.role === 'user' ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-slate-100 text-slate-800 rounded-tl-none border border-slate-200'
+                  <div className={`max-w-[85%] px-5 py-3.5 rounded-2xl text-sm leading-relaxed shadow-sm ${
+                    msg.role === 'user' 
+                      ? 'bg-slate-900 text-white rounded-tr-none' 
+                      : 'bg-white text-slate-700 rounded-tl-none border border-slate-200'
                   }`}>
                     {msg.content}
                   </div>
@@ -397,30 +479,39 @@ export default function App() {
               ))}
               {isTyping && (
                 <div className="flex justify-start">
-                  <div className="bg-slate-100 px-4 py-3 rounded-2xl rounded-tl-none border border-slate-200 flex items-center gap-2">
+                  <div className="bg-white px-5 py-4 rounded-2xl rounded-tl-none border border-slate-200 flex items-center gap-3 shadow-sm">
                     <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
-                    <span className="text-xs text-slate-500">Analizando manuales...</span>
+                    <span className="text-[11px] font-bold text-slate-400 uppercase tracking-tighter">Procesando estándares...</span>
                   </div>
                 </div>
               )}
             </div>
 
-            <form onSubmit={askAI} className="p-4 bg-slate-50 border-t border-slate-200 flex gap-2">
+            <form onSubmit={askAI} className="p-6 bg-white border-t border-slate-100 flex gap-3">
               <input 
-                className="flex-1 bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
-                placeholder="Pregunta sobre códigos de falla o el umbral de 10 min..."
+                className="flex-1 bg-slate-50 border border-slate-200 rounded-2xl px-5 py-3.5 text-sm outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all placeholder:text-slate-400"
+                placeholder="Escribe una consulta técnica..."
                 value={chatInput}
                 onChange={e => setChatInput(e.target.value)}
               />
-              <button disabled={isTyping} className="bg-indigo-600 text-white p-2.5 rounded-xl hover:bg-indigo-700 transition-all shadow-md disabled:opacity-50">
+              <button disabled={isTyping} className="bg-slate-900 text-white px-6 rounded-2xl hover:bg-slate-800 transition-all shadow-xl active:scale-95 disabled:opacity-50">
                 <Send className="w-5 h-5" />
               </button>
             </form>
           </div>
         )}
       </main>
-      <footer className="p-3 text-center text-[10px] text-slate-400 bg-white border-t">
-        Basado en GCGPET-M-001 y Mesa Técnica Abril 2026. Persistencia activa vía Cloud Storage.
+      
+      <footer className="p-4 text-center bg-white border-t border-slate-100">
+        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+            Protocolo Mesa Técnica Abril 2026 • Codelco Chile
+          </p>
+          <div className="flex items-center gap-4">
+            <span className="text-[9px] px-2 py-1 bg-slate-100 text-slate-500 rounded-lg font-bold">V 2.1.0-PROD</span>
+            <span className="text-[9px] px-2 py-1 bg-emerald-50 text-emerald-600 rounded-lg font-bold">STATUS: CLOUD ACTIVE</span>
+          </div>
+        </div>
       </footer>
     </div>
   );
