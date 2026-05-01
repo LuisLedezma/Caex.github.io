@@ -1,72 +1,427 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Buscador Web 930E</title>
-    <style>
-        :root { --blue: #004098; --yellow: #ffcc00; --dark: #121212; }
-        body { font-family: 'Segoe UI', sans-serif; margin: 0; background: var(--dark); color: white; text-align: center; }
-        header { background: var(--blue); padding: 20px; border-bottom: 5px solid var(--yellow); font-weight: bold; }
-        .container { padding: 30px; max-width: 500px; margin: auto; }
-        .input-group { margin-bottom: 25px; }
-        input { width: 100%; padding: 15px; border-radius: 10px; border: none; font-size: 18px; text-align: center; margin-bottom: 15px; box-sizing: border-box; }
-        .btn-search { background: var(--yellow); color: black; border: none; padding: 15px 30px; border-radius: 10px; font-weight: bold; cursor: pointer; width: 100%; font-size: 16px; transition: 0.3s; }
-        .btn-search:hover { background: #e6b800; }
-        .info-card { background: #1e1e1e; border: 1px solid #333; padding: 20px; border-radius: 10px; margin-top: 20px; }
-        .source-link { display: block; background: #2d2d2d; color: var(--yellow); padding: 10px; margin: 10px 0; border-radius: 5px; text-decoration: none; font-size: 14px; }
-        .source-link:hover { background: #3d3d3d; }
-    </style>
-</head>
-<body>
+import React, { useState, useEffect, useMemo } from 'react';
+import { 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend as RechartsLegend, ResponsiveContainer, 
+  PieChart, Pie, Cell 
+} from 'recharts';
+import { 
+  Settings, 
+  MessageSquare, 
+  Calculator, 
+  Clock, 
+  AlertCircle, 
+  CheckCircle2, 
+  Trash2, 
+  Plus, 
+  Info,
+  Activity,
+  Zap,
+  Send,
+  Loader2,
+  BarChart3
+} from 'lucide-react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, query } from 'firebase/firestore';
 
-<header>
-    SISTEMA DE BÚSQUEDA EN VIVO 930E
-</header>
+// --- CONFIGURACIÓN FIREBASE Y CONSTANTES ---
+const firebaseConfig = JSON.parse(__firebase_config);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'asarco-confiabilidad-v2';
+const apiKey = ""; 
 
-<div class="container">
-    <div class="input-group">
-        <input type="text" id="fallacode" placeholder="Ingrese Código (ej: 025)">
-        <button class="btn-search" onclick="buscarEnWeb()">BUSCAR EN LA RED</button>
+const UMBRAL_MNP_MINUTOS = 10;
+
+const ESTADOS_DISPONIBLES = [
+  { id: 'FALLA', label: 'Falla (MNP)', categoria: 'FS' },
+  { id: 'OPERANDO', label: 'Perforación / Operando', categoria: 'OP' },
+  { id: 'TRASLADO', label: 'Traslado Equipo', categoria: 'OP' },
+  { id: 'CAMBIO_POZO', label: 'Cambio de Pozo', categoria: 'OP' },
+  { id: 'RELEVO', label: 'Relevo / Cambio Turno', categoria: 'DEMORA' },
+  { id: 'COMBUSTIBLE', label: 'Abastecimiento Combustible', categoria: 'DEMORA' },
+  { id: 'TRONADURA', label: 'Espera Tronadura', categoria: 'DEMORA' },
+  { id: 'CLIMA', label: 'Condiciones Climáticas', categoria: 'DEMORA' },
+];
+
+const StatCard = ({ label, value, unit, icon: Icon, colorClass }) => (
+  <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+    <div className="flex items-center justify-between mb-2">
+      <span className="text-sm font-medium text-slate-500">{label}</span>
+      <Icon className={`w-5 h-5 ${colorClass}`} />
     </div>
-
-    <div class="info-card" id="instrucciones">
-        <p style="font-size: 14px; color: #888;">Esta herramienta buscará manuales y bases de datos técnicas del Komatsu 930E en tiempo real sin usar archivos internos.</p>
+    <div className="flex items-baseline gap-1">
+      <span className="text-2xl font-bold text-slate-900">{value}</span>
+      <span className="text-sm text-slate-500">{unit}</span>
     </div>
+  </div>
+);
 
-    <div id="resultados" style="display:none;">
-        <h3 style="color: var(--yellow);">Resultados para el código <span id="code-display"></span></h3>
-        <p>Seleccione una fuente técnica verificada:</p>
-        
-        <a id="link-google" target="_blank" class="source-link">🔍 Ver Manuales y PDFs en Google</a>
-        <a id="link-forum" target="_blank" class="source-link">🛠️ Buscar en Foros Técnicos</a>
-        <a id="link-direct" target="_blank" class="source-link">📖 Ver Info Técnica Komatsu</a>
-    </div>
-</div>
+export default function App() {
+  const [activeTab, setActiveTab] = useState('calculadora');
+  const [user, setUser] = useState(null);
+  const [eventos, setEventos] = useState([]);
+  const [periodoHoras, setPeriodoHoras] = useState(720);
+  const [chatInput, setChatInput] = useState("");
+  const [chatHistory, setChatHistory] = useState([
+    { role: 'assistant', content: '¡Hola! He restaurado el consultor IA. Puedes preguntarme sobre el manual GCGPET-M-001 o los acuerdos de la Mesa Técnica de Abril 2026.' }
+  ]);
+  const [isTyping, setIsTyping] = useState(false);
+  const [newEvento, setNewEvento] = useState({ descripcion: '', duracion: '', tipoId: 'FALLA' });
 
-<script>
-    function buscarEnWeb() {
-        const codigo = document.getElementById('fallacode').value.trim();
-        if (!codigo) return alert("Por favor, ingrese un código");
+  useEffect(() => {
+    const initAuth = async () => {
+      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+        await signInWithCustomToken(auth, __initial_auth_token);
+      } else {
+        await signInAnonymously(auth);
+      }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, setUser);
+    return () => unsubscribe();
+  }, []);
 
-        // Mostrar sección de resultados
-        document.getElementById('instrucciones').style.display = 'none';
-        document.getElementById('resultados').style.display = 'block';
-        document.getElementById('code-display').innerText = codigo;
+  useEffect(() => {
+    if (!user) return;
+    const q = doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'main');
+    const unsubscribe = onSnapshot(q, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setEventos(data.eventos || []);
+        setPeriodoHoras(data.periodoHoras || 720);
+      }
+    }, (error) => console.error("Error Firestore:", error));
+    return () => unsubscribe();
+  }, [user]);
 
-        // Construir búsquedas especializadas
-        const queryBase = `Komatsu 930E event code ${codigo}`;
-        
-        // Link 1: Búsqueda de archivos PDF y manuales específicos
-        document.getElementById('link-google').href = `https://www.google.com/search?q=${encodeURIComponent(queryBase + ' filetype:pdf')}`;
-        
-        // Link 2: Búsqueda en foros de maquinaria pesada
-        document.getElementById('link-forum').href = `https://www.google.com/search?q=${encodeURIComponent(queryBase + ' "troubleshooting" OR "repair"')}`;
-        
-        // Link 3: Búsqueda de imágenes/diagramas del código
-        document.getElementById('link-direct').href = `https://www.google.com/search?q=${encodeURIComponent('Komatsu 930E ' + codigo + ' circuit diagram')}&tbm=isch`;
+  const saveToCloud = async (newEventos, newPeriodo) => {
+    if (!user) return;
+    try {
+      await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'main'), {
+        eventos: newEventos,
+        periodoHoras: newPeriodo
+      });
+    } catch (e) {
+      console.error("Error al guardar:", e);
     }
-</script>
+  };
 
-</body>
-</html>
+  const metrics = useMemo(() => {
+    const dataEventos = eventos.map(e => {
+      const config = ESTADOS_DISPONIBLES.find(opt => opt.id === e.tipoId) || ESTADOS_DISPONIBLES[0];
+      return { ...e, categoria: config.categoria, label: config.label };
+    });
+
+    const tiempoNominal = Number(periodoHoras) || 0;
+
+    const fallasValidas = dataEventos.filter(f => f.categoria === 'FS' && (Number(f.duracion) || 0) >= UMBRAL_MNP_MINUTOS);
+    const tFallasTotal = fallasValidas.reduce((acc, curr) => acc + (Number(curr.duracion) || 0), 0) / 60;
+
+    const ruidoOperacionalTotal = dataEventos
+      .filter(f => f.categoria === 'FS' && (Number(f.duracion) || 0) < UMBRAL_MNP_MINUTOS)
+      .reduce((acc, curr) => acc + (Number(curr.duracion) || 0), 0) / 60;
+
+    const tDemorasTotal = dataEventos
+      .filter(e => e.categoria === 'DEMORA')
+      .reduce((acc, curr) => acc + (Number(curr.duracion) || 0), 0) / 60;
+
+    const tOperativoCalculado = Math.max(0, tiempoNominal - tFallasTotal);
+    const tTrabajoEfectivo = Math.max(0, tOperativoCalculado - tDemorasTotal - ruidoOperacionalTotal);
+
+    const mtbf = fallasValidas.length > 0 ? (tOperativoCalculado / fallasValidas.length).toFixed(1) : tOperativoCalculado.toFixed(1);
+    const mttr = fallasValidas.length > 0 ? (tFallasTotal / fallasValidas.length).toFixed(1) : 0;
+    const disponibilidad = tiempoNominal > 0 ? ((tOperativoCalculado / tiempoNominal) * 100).toFixed(1) : 0;
+    
+    const utilizacion = tOperativoCalculado > 0 
+      ? ((tTrabajoEfectivo / tOperativoCalculado) * 100).toFixed(1) 
+      : 0;
+
+    return { 
+      mtbf, 
+      mttr, 
+      disponibilidad, 
+      utilizacion,
+      tOperativoTotal: tOperativoCalculado.toFixed(2), 
+      tDemorasTotal: tDemorasTotal.toFixed(2), 
+      tFallasTotal: tFallasTotal.toFixed(2),
+      tRuidoTotal: ruidoOperacionalTotal.toFixed(2)
+    };
+  }, [eventos, periodoHoras]);
+
+  const addEvento = (e) => {
+    e.preventDefault();
+    if (!newEvento.descripcion || !newEvento.duracion) return;
+    const updated = [...eventos, { ...newEvento, id: Date.now(), timestamp: new Date().toLocaleTimeString() }];
+    setEventos(updated);
+    saveToCloud(updated, periodoHoras);
+    setNewEvento({ descripcion: '', duracion: '', tipoId: 'FALLA' });
+  };
+
+  const deleteEvento = (id) => {
+    const updated = eventos.filter(e => e.id !== id);
+    setEventos(updated);
+    saveToCloud(updated, periodoHoras);
+  };
+
+  const askAI = async (e) => {
+    e.preventDefault();
+    if (!chatInput.trim() || isTyping) return;
+    const userQuery = chatInput;
+    setChatHistory(prev => [...prev, { role: 'user', content: userQuery }]);
+    setChatInput("");
+    setIsTyping(true);
+    try {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: userQuery }] }],
+          systemInstruction: { parts: [{ text: "Eres ASARCO, experto en confiabilidad para Codelco. Responde basándote en el manual GCGPET-M-001 y los acuerdos de la Mesa Técnica de Abril 2026. El umbral para MNP es >= 10 minutos. Sé técnico y preciso." }] }
+        })
+      });
+      const data = await response.json();
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "Lo siento, tuve un problema al procesar tu consulta.";
+      setChatHistory(prev => [...prev, { role: 'assistant', content: text }]);
+    } catch (err) {
+      setChatHistory(prev => [...prev, { role: 'assistant', content: "Error de conexión con el motor IA. Por favor, reintenta." }]);
+    } finally {
+      setIsTyping(false);
+    }
+  };
+
+  const pieData = [
+    { name: 'Trabajo Real', value: Math.max(0, Number(metrics.tOperativoTotal) - Number(metrics.tDemorasTotal) - Number(metrics.tRuidoTotal)), color: "#10b981" },
+    { name: 'Fallas (MNP)', value: Number(metrics.tFallasTotal), color: "#ef4444" },
+    { name: 'Demoras + Ruido', value: Number(metrics.tDemorasTotal) + Number(metrics.tRuidoTotal), color: "#f59e0b" }
+  ];
+
+  return (
+    <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-900">
+      <header className="bg-indigo-900 text-white p-4 shadow-lg flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <Zap className="w-6 h-6 text-yellow-400" />
+          <h1 className="text-xl font-bold">ASARCO <span className="text-indigo-300 text-xs font-normal italic">Gestión de Activos</span></h1>
+        </div>
+        <div className="flex bg-indigo-950/50 p-1 rounded-lg border border-white/10">
+          <button onClick={() => setActiveTab('calculadora')} className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${activeTab === 'calculadora' ? 'bg-white text-indigo-900 shadow-sm' : 'text-indigo-200'}`}>Calculadora</button>
+          <button onClick={() => setActiveTab('consultor')} className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${activeTab === 'consultor' ? 'bg-white text-indigo-900 shadow-sm' : 'text-indigo-200'}`}>Consultor IA</button>
+        </div>
+      </header>
+
+      <main className="flex-1 p-4 md:p-8 max-w-7xl mx-auto w-full space-y-6">
+        {activeTab === 'calculadora' ? (
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+              <StatCard label="MTBF" value={metrics.mtbf} unit="hrs" icon={Clock} colorClass="text-blue-600" />
+              <StatCard label="MTTR" value={metrics.mttr} unit="hrs" icon={AlertCircle} colorClass="text-amber-600" />
+              <StatCard label="Disponibilidad" value={metrics.disponibilidad} unit="%" icon={CheckCircle2} colorClass="text-emerald-600" />
+              <StatCard label="Utilización" value={metrics.utilizacion} unit="%" icon={BarChart3} colorClass="text-purple-600" />
+              <StatCard label="T. Operativo" value={metrics.tOperativoTotal} unit="hrs" icon={Activity} colorClass="text-indigo-600" />
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="lg:col-span-2 space-y-6">
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+                  <div className="flex items-center gap-2 mb-4">
+                    <Plus className="w-5 h-5 text-indigo-600" />
+                    <h3 className="font-semibold text-slate-800">Registrar Nuevo Estado</h3>
+                  </div>
+                  <form onSubmit={addEvento} className="flex flex-wrap gap-4 items-end">
+                    <div className="flex-1 min-w-[200px]">
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Descripción</label>
+                      <input 
+                        type="text" className="w-full px-3 py-2 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
+                        placeholder="Ej: Perforación Pozo 50"
+                        value={newEvento.descripcion}
+                        onChange={e => setNewEvento({...newEvento, descripcion: e.target.value})}
+                      />
+                    </div>
+                    <div className="w-28">
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Minutos</label>
+                      <input 
+                        type="number" className="w-full px-3 py-2 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
+                        value={newEvento.duracion}
+                        onChange={e => setNewEvento({...newEvento, duracion: e.target.value})}
+                      />
+                    </div>
+                    <div className="w-52">
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Estado</label>
+                      <select 
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg outline-none bg-white focus:ring-2 focus:ring-indigo-500 text-sm"
+                        value={newEvento.tipoId}
+                        onChange={e => setNewEvento({...newEvento, tipoId: e.target.value})}
+                      >
+                        {ESTADOS_DISPONIBLES.map(opt => (
+                          <option key={opt.id} value={opt.id}>{opt.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <button type="submit" className="h-[42px] px-6 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 transition-all shadow-md">Agregar</button>
+                  </form>
+                </div>
+
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+                  <div className="flex items-center gap-2 mb-4">
+                    <Clock className="w-5 h-5 text-indigo-600" />
+                    <h3 className="font-semibold text-slate-800">Bitácora Diaria</h3>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                      <thead>
+                        <tr className="border-b border-slate-100 text-xs text-slate-500 uppercase tracking-wider">
+                          <th className="pb-3 font-semibold">Evento / Descripción</th>
+                          <th className="pb-3 font-semibold text-center">Duración</th>
+                          <th className="pb-3 font-semibold text-center">Estado</th>
+                          <th className="pb-3 font-semibold">Impacto</th>
+                          <th className="pb-3"></th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-50">
+                        {eventos.length === 0 ? (
+                          <tr>
+                            <td colSpan="5" className="py-8 text-center text-slate-400 italic">No hay registros hoy.</td>
+                          </tr>
+                        ) : (
+                          eventos.map(evento => {
+                            const conf = ESTADOS_DISPONIBLES.find(o => o.id === evento.tipoId) || ESTADOS_DISPONIBLES[0];
+                            const dur = Number(evento.duracion);
+                            return (
+                              <tr key={evento.id} className="hover:bg-slate-50/50 group transition-colors text-sm">
+                                <td className="py-3">
+                                  <div className="font-medium text-slate-700">{evento.descripcion}</div>
+                                  <div className="text-[10px] text-slate-400">{conf.label}</div>
+                                </td>
+                                <td className="py-3 text-center font-mono">{evento.duracion}m</td>
+                                <td className="py-3 text-center">
+                                  <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${
+                                    conf.categoria === 'OP' ? 'bg-emerald-100 text-emerald-700' : 
+                                    conf.categoria === 'DEMORA' ? 'bg-amber-50 text-amber-600' : 'bg-red-50 text-red-600'
+                                  }`}>
+                                    {conf.categoria === 'OP' ? 'Operativo' : conf.categoria === 'DEMORA' ? 'Demora' : 'Falla'}
+                                  </span>
+                                </td>
+                                <td className="py-3 text-[11px] text-slate-500">
+                                  {conf.categoria === 'FS' && dur < 10 ? 'Ruido (Uti.)' : 
+                                   conf.categoria === 'FS' ? 'MNP (Disp.)' : 
+                                   conf.categoria === 'DEMORA' ? 'Demora (Uti.)' : 'Producción'}
+                                </td>
+                                <td className="py-3 text-right">
+                                  <button onClick={() => deleteEvento(evento.id)} className="text-slate-300 hover:text-red-500 p-1"><Trash2 className="w-4 h-4" /></button>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-6">
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+                  <div className="flex items-center gap-2 mb-4">
+                    <Settings className="w-5 h-5 text-indigo-600" />
+                    <h3 className="font-semibold text-slate-800">Horas Nominales</h3>
+                  </div>
+                  <input 
+                    type="number" 
+                    className="w-full px-4 py-3 bg-indigo-50 border-2 border-indigo-200 rounded-xl font-bold text-indigo-900 text-xl outline-none"
+                    value={periodoHoras}
+                    onChange={e => {
+                      setPeriodoHoras(e.target.value);
+                      saveToCloud(eventos, e.target.value);
+                    }}
+                  />
+                  <p className="mt-2 text-[10px] text-slate-400">Periodo nominal editable (24h, 168h, 720h).</p>
+                </div>
+
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+                  <h3 className="font-semibold text-slate-800 mb-4 flex items-center gap-2">
+                    <Activity className="w-5 h-5 text-indigo-600" />
+                    Distribución de Tiempo
+                  </h3>
+                  <div className="flex flex-col items-center">
+                    <div className="h-48 w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={pieData}
+                            innerRadius={50} outerRadius={70} paddingAngle={5} dataKey="value"
+                          >
+                            {pieData.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={entry.color} />
+                            ))}
+                          </Pie>
+                          <Tooltip />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                    {/* Leyenda al costado/debajo con texto explícito */}
+                    <div className="w-full mt-4 space-y-2">
+                      {pieData.map((item, idx) => (
+                        <div key={idx} className="flex items-center gap-3">
+                          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />
+                          <span className="text-xs font-semibold text-slate-700">{item.name}</span>
+                          <span className="text-xs text-slate-400 ml-auto">{Number(item.value).toFixed(1)} hrs</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="max-w-3xl mx-auto flex flex-col h-[600px] bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
+            <div className="bg-slate-50 p-4 border-b border-slate-200 flex items-center gap-3">
+              <div className="bg-indigo-600 p-2 rounded-lg">
+                <MessageSquare className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h2 className="font-bold text-slate-800">Consultor IA ASARCO</h2>
+                <p className="text-[10px] text-slate-500 font-medium">Experto en Manual GCGPET-M-001</p>
+              </div>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              {chatHistory.map((msg, i) => (
+                <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-[85%] px-4 py-2.5 rounded-2xl text-sm ${
+                    msg.role === 'user' ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-slate-100 text-slate-800 rounded-tl-none border border-slate-200'
+                  }`}>
+                    {msg.content}
+                  </div>
+                </div>
+              ))}
+              {isTyping && (
+                <div className="flex justify-start">
+                  <div className="bg-slate-100 px-4 py-3 rounded-2xl rounded-tl-none border border-slate-200 flex items-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
+                    <span className="text-xs text-slate-500">Analizando manuales...</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <form onSubmit={askAI} className="p-4 bg-slate-50 border-t border-slate-200 flex gap-2">
+              <input 
+                className="flex-1 bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                placeholder="Pregunta sobre códigos de falla o el umbral de 10 min..."
+                value={chatInput}
+                onChange={e => setChatInput(e.target.value)}
+              />
+              <button disabled={isTyping} className="bg-indigo-600 text-white p-2.5 rounded-xl hover:bg-indigo-700 transition-all shadow-md disabled:opacity-50">
+                <Send className="w-5 h-5" />
+              </button>
+            </form>
+          </div>
+        )}
+      </main>
+      <footer className="p-3 text-center text-[10px] text-slate-400 bg-white border-t">
+        Basado en GCGPET-M-001 y Mesa Técnica Abril 2026. Persistencia activa vía Cloud Storage.
+      </footer>
+    </div>
+  );
+}
